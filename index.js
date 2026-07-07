@@ -149,6 +149,9 @@ client.on(Events.InteractionCreate, async (interaction) => {
       case "ticket_bugreport":
         await createTicket(interaction, "bugreport");
         break;
+      case "ticket_autre":
+        await createTicket(interaction, "autre");
+        break;
       case "ticket_close":
         await closeTicket(interaction);
         break;

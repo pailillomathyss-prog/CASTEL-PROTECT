@@ -7,27 +7,16 @@ import {
 } from "discord.js";
 
 // ── Panel ──────────────────────────────────────────────────────────────────────
-/**
- * !ticket setup [#salon]
- * Envoie le panel de tickets dans le salon mentionné ou le salon actuel.
- */
 export async function executeTicketSetup(message, args, PREFIX) {
-  if (!message.member.permissions.has("ManageChannels")) {
+  if (!message.member.permissions.has("ManageChannels"))
     return message.reply("❌ Permission `Gérer les salons` requise.");
-  }
 
-  const channel =
-    message.mentions.channels.first() || message.channel;
+  const channel = message.mentions.channels.first() || message.channel;
 
   const row = new ActionRowBuilder().addComponents(
-    new ButtonBuilder()
-      .setCustomId("ticket_rankup")
-      .setLabel("📈 Rank Up")
-      .setStyle(ButtonStyle.Primary),
-    new ButtonBuilder()
-      .setCustomId("ticket_bugreport")
-      .setLabel("🐛 Bug Report")
-      .setStyle(ButtonStyle.Danger),
+    new ButtonBuilder().setCustomId("ticket_rankup").setLabel("📈 Rank Up").setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId("ticket_bugreport").setLabel("🐛 Bug Report").setStyle(ButtonStyle.Danger),
+    new ButtonBuilder().setCustomId("ticket_autre").setLabel("❓ Autre").setStyle(ButtonStyle.Secondary),
   );
 
   await channel.send({
@@ -37,16 +26,16 @@ export async function executeTicketSetup(message, args, PREFIX) {
       description:
         "Clique sur le bouton correspondant à ta demande pour ouvrir un ticket.\n\n" +
         "📈 **Rank Up** — Demande une montée en grade\n" +
-        "🐛 **Bug Report** — Signale un bug ou un problème",
+        "🐛 **Bug Report** — Signale un bug ou un problème\n" +
+        "❓ **Autre** — Toute autre demande ou question",
       footer: { text: "CASTEL PROTECT • Support" },
       timestamp: new Date().toISOString(),
     }],
     components: [row],
   });
 
-  if (channel.id !== message.channel.id) {
+  if (channel.id !== message.channel.id)
     await message.reply(`✅ Panel de tickets envoyé dans ${channel}.`);
-  }
 }
 
 // ── Création d'un ticket ──────────────────────────────────────────────────────
@@ -54,39 +43,23 @@ export async function createTicket(interaction, type) {
   const guild  = interaction.guild;
   const member = interaction.member;
 
-  // Vérifier si l'utilisateur a déjà un ticket ouvert
   const existing = guild.channels.cache.find(
     (c) => c.name === ticketChannelName(member.user.username, type) && c.type === ChannelType.GuildText
   );
-  if (existing) {
-    return interaction.reply({
-      content: `❌ Tu as déjà un ticket ouvert : ${existing}`,
-      ephemeral: true,
-    });
-  }
+  if (existing)
+    return interaction.reply({ content: `❌ Tu as déjà un ticket ouvert : ${existing}`, ephemeral: true });
 
   await interaction.deferReply({ ephemeral: true });
 
   try {
-    // Chercher ou créer la catégorie "Tickets"
     let category = guild.channels.cache.find(
       (c) => c.type === ChannelType.GuildCategory && c.name.toLowerCase() === "tickets"
     );
-    if (!category) {
-      category = await guild.channels.create({
-        name: "Tickets",
-        type: ChannelType.GuildCategory,
-      });
-    }
+    if (!category)
+      category = await guild.channels.create({ name: "Tickets", type: ChannelType.GuildCategory });
 
-    const channelName = ticketChannelName(member.user.username, type);
-
-    // Permissions : privé par défaut, visible par le membre + admins/mods
     const permissionOverwrites = [
-      {
-        id: guild.roles.everyone,
-        deny: [PermissionFlagsBits.ViewChannel],
-      },
+      { id: guild.roles.everyone, deny: [PermissionFlagsBits.ViewChannel] },
       {
         id: member.id,
         allow: [
@@ -107,12 +80,8 @@ export async function createTicket(interaction, type) {
       },
     ];
 
-    // Ajouter accès à tous les rôles ayant ManageGuild ou Administrator
     guild.roles.cache.forEach((role) => {
-      if (
-        role.permissions.has(PermissionFlagsBits.ManageGuild) ||
-        role.permissions.has(PermissionFlagsBits.Administrator)
-      ) {
+      if (role.permissions.has(PermissionFlagsBits.ManageGuild) || role.permissions.has(PermissionFlagsBits.Administrator)) {
         permissionOverwrites.push({
           id: role.id,
           allow: [
@@ -126,19 +95,15 @@ export async function createTicket(interaction, type) {
     });
 
     const ticketChannel = await guild.channels.create({
-      name: channelName,
+      name: ticketChannelName(member.user.username, type),
       type: ChannelType.GuildText,
       parent: category.id,
       permissionOverwrites,
       topic: `Ticket ${typeLabel(type)} de ${member.user.tag}`,
     });
 
-    // Message d'accueil dans le ticket
     const closeRow = new ActionRowBuilder().addComponents(
-      new ButtonBuilder()
-        .setCustomId("ticket_close")
-        .setLabel("🔒 Fermer le ticket")
-        .setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId("ticket_close").setLabel("🔒 Fermer le ticket").setStyle(ButtonStyle.Secondary),
     );
 
     await ticketChannel.send({
@@ -151,7 +116,7 @@ export async function createTicket(interaction, type) {
           typeInstructions(type),
         fields: [
           { name: "Membre", value: `${member.user.tag} (${member.id})`, inline: true },
-          { name: "Type", value: typeLabel(type), inline: true },
+          { name: "Type",   value: typeLabel(type),                      inline: true },
         ],
         footer: { text: "CASTEL PROTECT • Tickets | Clique 🔒 pour fermer" },
         timestamp: new Date().toISOString(),
@@ -159,32 +124,25 @@ export async function createTicket(interaction, type) {
       components: [closeRow],
     });
 
-    await interaction.editReply({
-      content: `✅ Ton ticket a été créé : ${ticketChannel}`,
-    });
+    await interaction.editReply({ content: `✅ Ton ticket a été créé : ${ticketChannel}` });
   } catch (err) {
     console.error("[ticket] createTicket :", err);
     await interaction.editReply({ content: "❌ Erreur lors de la création du ticket." });
   }
 }
 
-// ── Fermeture d'un ticket ─────────────────────────────────────────────────────
+// ── Fermeture ─────────────────────────────────────────────────────────────────
 export async function closeTicket(interaction) {
   const channel = interaction.channel;
   const member  = interaction.member;
 
-  // Seul le membre du ticket ou un modérateur peut fermer
-  const isMod =
-    member.permissions.has(PermissionFlagsBits.ManageChannels) ||
-    member.permissions.has(PermissionFlagsBits.Administrator);
-
-  // Vérifier que le nom du salon correspond à un ticket
   const isTicketChannel =
-    channel.name.startsWith("rankup-") || channel.name.startsWith("bugreport-");
+    channel.name.startsWith("rankup-") ||
+    channel.name.startsWith("bugreport-") ||
+    channel.name.startsWith("autre-");
 
-  if (!isTicketChannel) {
+  if (!isTicketChannel)
     return interaction.reply({ content: "❌ Ce n'est pas un salon de ticket.", ephemeral: true });
-  }
 
   await interaction.reply({
     embeds: [{
@@ -207,19 +165,25 @@ function ticketChannelName(username, type) {
 }
 
 function typeLabel(type) {
-  return type === "rankup" ? "Rank Up" : "Bug Report";
+  if (type === "rankup")    return "Rank Up";
+  if (type === "bugreport") return "Bug Report";
+  return "Autre";
 }
 
 function typeEmoji(type) {
-  return type === "rankup" ? "📈" : "🐛";
+  if (type === "rankup")    return "📈";
+  if (type === "bugreport") return "🐛";
+  return "❓";
 }
 
 function typeColor(type) {
-  return type === "rankup" ? 0x00c851 : 0xff4444;
+  if (type === "rankup")    return 0x00c851;
+  if (type === "bugreport") return 0xff4444;
+  return 0xffa500;
 }
 
 function typeInstructions(type) {
-  if (type === "rankup") {
+  if (type === "rankup")
     return (
       "**Pour ta demande de Rank Up, merci de préciser :**\n" +
       "• Ton pseudo en jeu\n" +
@@ -227,12 +191,18 @@ function typeInstructions(type) {
       "• Le rang demandé\n" +
       "• Tes preuves (screenshots, vidéos…)"
     );
-  }
+  if (type === "bugreport")
+    return (
+      "**Pour ton Bug Report, merci de préciser :**\n" +
+      "• Description du bug\n" +
+      "• Comment le reproduire\n" +
+      "• Screenshots ou vidéos si possible\n" +
+      "• Date / heure à laquelle tu l'as rencontré"
+    );
   return (
-    "**Pour ton Bug Report, merci de préciser :**\n" +
-    "• Description du bug\n" +
-    "• Comment le reproduire\n" +
-    "• Screenshots ou vidéos si possible\n" +
-    "• Date / heure à laquelle tu l'as rencontré"
+    "**Explique-nous ta demande :**\n" +
+    "• Décris ton problème ou ta question en détail\n" +
+    "• Ajoute des screenshots si nécessaire\n" +
+    "Un membre du staff reviendra vers toi dès que possible."
   );
 }
