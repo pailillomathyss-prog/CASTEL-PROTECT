@@ -17,7 +17,6 @@ function loadConfig() {
     return JSON.parse(readFileSync(CONFIG_FILE, "utf8"));
   } catch { return {}; }
 }
-
 function saveConfig(cfg) {
   try {
     if (!existsSync("./data")) mkdirSync("./data", { recursive: true });
@@ -27,18 +26,15 @@ function saveConfig(cfg) {
 
 export const sopConfig = loadConfig();
 
-// ── Votes en mémoire ─────────────────────────────────────────────────────────
-// sessionId -> { smashers: Set<userId>, passers: Set<userId>, messageId, channelId, guildId }
+// ── Votes en mémoire ──────────────────────────────────────────────────────────
+// sessionId -> { smashers, passers, messageId, channelId, guildId }
 export const voteData = new Map();
 
-// Utilisateurs en attente de soumission de photo (via DM)
-// userId -> { guildId, votesChannelId, username }
+// Utilisateurs en attente de soumission
+// userId -> { guildId, votesChannelId, anonymous: bool }
 export const pendingSubmissions = new Map();
 
 // ── Setup ─────────────────────────────────────────────────────────────────────
-/**
- * !sopphoto setup #panel #votes
- */
 export async function executeSopPhotoSetup(message, args, PREFIX) {
   if (!message.member.permissions.has("ManageChannels"))
     return message.reply("❌ Permission `Gérer les salons` requise.");
@@ -46,35 +42,25 @@ export async function executeSopPhotoSetup(message, args, PREFIX) {
   const channels = message.mentions.channels;
   if (channels.size < 2)
     return message.reply(
-      `❌ Mentionne 2 salons.\nUsage : \`${PREFIX}sopphoto setup #panel #votes\`\n` +
-      `• **#panel** — salon en lecture seule avec le bouton de soumission\n` +
-      `• **#votes** — salon où les photos apparaissent pour voter`
+      `❌ Mentionne 2 salons.\nUsage : \`${PREFIX}sopphoto setup #panel #votes\``
     );
 
   const [panelChannel, votesChannel] = [...channels.values()];
 
-  // Rendre le panel en lecture seule pour @everyone
   await panelChannel.permissionOverwrites.edit(message.guild.roles.everyone, {
-    SendMessages: false,
-    AddReactions: false,
-    CreatePublicThreads: false,
-    CreatePrivateThreads: false,
+    SendMessages: false, AddReactions: false,
+    CreatePublicThreads: false, CreatePrivateThreads: false,
   });
-
-  // Rendre les votes en lecture seule aussi (seul le bot écrit)
   await votesChannel.permissionOverwrites.edit(message.guild.roles.everyone, {
-    SendMessages: false,
-    AddReactions: false,
+    SendMessages: false, AddReactions: false,
   });
 
-  // Sauvegarder la config
   sopConfig[message.guild.id] = {
     panelChannelId: panelChannel.id,
     votesChannelId: votesChannel.id,
   };
   saveConfig(sopConfig);
 
-  // Envoyer le panel
   const row = new ActionRowBuilder().addComponents(
     new ButtonBuilder()
       .setCustomId("sop_submit")
@@ -89,66 +75,103 @@ export async function executeSopPhotoSetup(message, args, PREFIX) {
       description:
         "Tu penses mériter un **Smash** ? Soumet ta photo et laisse la communauté décider !\n\n" +
         "📸 Clique sur le bouton ci-dessous\n" +
-        "📩 Le bot t'enverra un message privé\n" +
-        "🗳️ Ta photo sera publiée ici pour que tout le monde vote",
+        "🕵️ Choisis d'apparaître **anonymement** ou **avec ton pseudo**\n" +
+        "🗳️ La communauté vote avec 💪 Smash ou ❌ Pass",
       footer: { text: "CASTEL PROTECT • Smash or Pass Photos" },
       timestamp: new Date().toISOString(),
     }],
     components: [row],
   });
 
-  await message.reply(
-    `✅ Système Smash or Pass photos configuré !\n` +
-    `• Panel : ${panelChannel}\n` +
-    `• Votes : ${votesChannel}`
-  );
+  await message.reply(`✅ Configuré !\n• Panel : ${panelChannel}\n• Votes : ${votesChannel}`);
 }
 
-// ── Bouton "Soumettre ma photo" ───────────────────────────────────────────────
+// ── Bouton "Soumettre ma photo" → choix anonyme/public ───────────────────────
 export async function handleSopSubmitButton(interaction) {
-  const guildId = interaction.guild.id;
-  const config  = sopConfig[guildId];
-
+  const config = sopConfig[interaction.guild.id];
   if (!config)
     return interaction.reply({
-      content: "❌ Le système n'est pas configuré. Un admin doit faire `!sopphoto setup #panel #votes`.",
+      content: "❌ Système non configuré. Fais `!sopphoto setup #panel #votes`.",
       ephemeral: true,
     });
 
+  // Proposer le choix : anonyme ou avec pseudo
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId("sop_anon")
+      .setLabel("🕵️ Anonyme")
+      .setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder()
+      .setCustomId("sop_public")
+      .setLabel("👤 Avec mon pseudo")
+      .setStyle(ButtonStyle.Primary),
+  );
+
+  await interaction.reply({
+    embeds: [{
+      color: 0xff69b4,
+      title: "📸 Comment veux-tu apparaître ?",
+      description:
+        "🕵️ **Anonyme** — personne ne saura que c'est toi\n" +
+        "👤 **Avec mon pseudo** — ton pseudo et ta photo de profil seront affichés",
+      footer: { text: "CASTEL PROTECT • Smash or Pass" },
+    }],
+    components: [row],
+    ephemeral: true,
+  });
+}
+
+// ── Choix anonyme ou public ───────────────────────────────────────────────────
+export async function handleSopModeChoice(interaction, anonymous) {
+  const config = sopConfig[interaction.guild.id];
+  if (!config)
+    return interaction.reply({ content: "❌ Système non configuré.", ephemeral: true });
+
   const userId = interaction.user.id;
 
-  // Marquer l'utilisateur comme en attente
   pendingSubmissions.set(userId, {
-    guildId,
+    guildId: interaction.guild.id,
     votesChannelId: config.votesChannelId,
+    anonymous,
     username: interaction.user.username,
+    avatarUrl: interaction.user.displayAvatarURL({ size: 64 }),
   });
 
-  // Timeout de 3 minutes pour la soumission
+  // Timeout 3 minutes
   setTimeout(() => pendingSubmissions.delete(userId), 3 * 60 * 1000);
 
   try {
     await interaction.user.send({
       embeds: [{
-        color: 0xff69b4,
-        title: "📸 Soumission Smash or Pass",
+        color: anonymous ? 0x888888 : 0xff69b4,
+        title: anonymous ? "🕵️ Mode anonyme activé" : "👤 Mode public activé",
         description:
-          "Envoie ta **photo** ici en message privé et elle sera publiée dans le salon de vote !\n\n" +
-          "⚠️ Tu as **3 minutes** pour envoyer ta photo.\n" +
-          "✅ Une seule photo acceptée (JPG, PNG, GIF, WEBP)",
+          `Tu vas apparaître **${anonymous ? "anonymement" : "avec ton pseudo"}**.\n\n` +
+          "Envoie ta **photo** ici en message privé maintenant !\n" +
+          "⏱️ Tu as **3 minutes**.",
         footer: { text: "CASTEL PROTECT • Smash or Pass" },
       }],
     });
 
-    await interaction.reply({
-      content: "📩 Vérifie tes **messages privés** ! Envoie ta photo au bot directement.",
-      ephemeral: true,
+    await interaction.update({
+      embeds: [{
+        color: 0x00c851,
+        title: "📩 Check tes messages privés !",
+        description: `Mode choisi : **${anonymous ? "🕵️ Anonyme" : "👤 " + interaction.user.username}**\nEnvoie ta photo au bot en DM.`,
+        footer: { text: "CASTEL PROTECT • Smash or Pass" },
+      }],
+      components: [],
     });
   } catch {
     pendingSubmissions.delete(userId);
-    await interaction.reply({
-      content: "❌ Je ne peux pas t'envoyer de message privé. Active tes DMs (`Paramètres → Confidentialité → Messages privés des membres du serveur`).",
-      ephemeral: true,
+    await interaction.update({
+      embeds: [{
+        color: 0xff0000,
+        title: "❌ DMs fermés",
+        description: "Active tes messages privés : **Paramètres → Confidentialité → Messages privés des membres du serveur**.",
+        footer: { text: "CASTEL PROTECT • Smash or Pass" },
+      }],
+      components: [],
     });
   }
 }
@@ -157,27 +180,22 @@ export async function handleSopSubmitButton(interaction) {
 export async function handleSopDm(message, client) {
   const userId  = message.author.id;
   const pending = pendingSubmissions.get(userId);
-  if (!pending) return; // Pas en attente
+  if (!pending) return;
 
-  // Chercher une image dans les attachments
-  const image = message.attachments.find((a) =>
-    a.contentType && a.contentType.startsWith("image/")
+  const image = message.attachments.find(
+    (a) => a.contentType && a.contentType.startsWith("image/")
   );
-
-  if (!image) {
+  if (!image)
     return message.reply("❌ Envoie une **image** (JPG, PNG, GIF, WEBP).");
-  }
 
   pendingSubmissions.delete(userId);
 
   try {
     const guild        = await client.guilds.fetch(pending.guildId);
     const votesChannel = await guild.channels.fetch(pending.votesChannelId);
+    const sessionId    = `${Date.now()}_${userId.slice(-4)}`;
 
-    // Générer un ID unique pour cette session de vote
-    const sessionId = `${Date.now()}_${userId.slice(-4)}`;
-
-    const smashRow = new ActionRowBuilder().addComponents(
+    const voteRow = new ActionRowBuilder().addComponents(
       new ButtonBuilder()
         .setCustomId(`sop_smash_${sessionId}`)
         .setLabel("💪 Smash   0")
@@ -188,32 +206,43 @@ export async function handleSopDm(message, client) {
         .setStyle(ButtonStyle.Danger),
     );
 
-    const voteMsg = await votesChannel.send({
-      embeds: [{
-        color: 0xff69b4,
-        title: "💥 Smash or Pass",
-        description: "Vote maintenant ! 💪 **Smash** ou ❌ **Pass** ?",
-        image: { url: image.url },
-        footer: { text: `Soumis anonymement • CASTEL PROTECT` },
-        timestamp: new Date().toISOString(),
-      }],
-      components: [smashRow],
-    });
+    // Embed selon le mode
+    const embed = {
+      color: 0xff69b4,
+      title: "💥 Smash or Pass",
+      description: "Vote ! 💪 **Smash** ou ❌ **Pass** ?",
+      image: { url: image.url },
+      timestamp: new Date().toISOString(),
+    };
 
-    // Enregistrer les données de vote
+    if (pending.anonymous) {
+      embed.footer = { text: "Soumis anonymement • CASTEL PROTECT" };
+    } else {
+      embed.author = {
+        name: pending.username,
+        icon_url: pending.avatarUrl,
+      };
+      embed.footer = { text: "CASTEL PROTECT • Smash or Pass" };
+    }
+
+    const voteMsg = await votesChannel.send({ embeds: [embed], components: [voteRow] });
+
     voteData.set(sessionId, {
       smashers: new Set(),
       passers: new Set(),
       messageId: voteMsg.id,
       channelId: votesChannel.id,
       guildId: pending.guildId,
+      anonymous: pending.anonymous,
+      username: pending.username,
+      avatarUrl: pending.avatarUrl,
     });
 
     await message.reply({
       embeds: [{
         color: 0x00c851,
         title: "✅ Photo soumise !",
-        description: "Ta photo a été publiée dans le salon de vote. Bonne chance ! 🎉",
+        description: `Ta photo a été publiée ${pending.anonymous ? "**anonymement**" : "**avec ton pseudo**"} dans le salon de vote. Bonne chance ! 🎉`,
         footer: { text: "CASTEL PROTECT • Smash or Pass" },
       }],
     });
@@ -223,7 +252,7 @@ export async function handleSopDm(message, client) {
   }
 }
 
-// ── Vote Smash / Pass ─────────────────────────────────────────────────────────
+// ── Vote ──────────────────────────────────────────────────────────────────────
 export async function handleSopVote(interaction, voteType, sessionId) {
   const session = voteData.get(sessionId);
   if (!session)
@@ -244,9 +273,10 @@ export async function handleSopVote(interaction, voteType, sessionId) {
     passers.add(userId);
   }
 
-  const total      = smashers.size + passers.size;
-  const smashPct   = total > 0 ? Math.round((smashers.size / total) * 100) : 0;
-  const passPct    = 100 - smashPct;
+  const total    = smashers.size + passers.size;
+  const smashPct = total > 0 ? Math.round((smashers.size / total) * 100) : 0;
+  const passPct  = 100 - smashPct;
+  const bar      = "🟩".repeat(Math.round((smashPct / 100) * 16)) + "🟥".repeat(Math.round((passPct / 100) * 16));
 
   const updatedRow = new ActionRowBuilder().addComponents(
     new ButtonBuilder()
@@ -259,29 +289,24 @@ export async function handleSopVote(interaction, voteType, sessionId) {
       .setStyle(ButtonStyle.Danger),
   );
 
-  const bar = buildBar(smashPct);
+  const originalEmbed = interaction.message.embeds[0];
+  const embed = {
+    color: 0xff69b4,
+    title: "💥 Smash or Pass",
+    description:
+      `Vote ! 💪 **Smash** ou ❌ **Pass** ?\n\n` +
+      `${bar}\n` +
+      `💪 **${smashPct}%**  •  **${passPct}%** ❌   _${total} vote(s)_`,
+    image: { url: originalEmbed?.image?.url },
+    timestamp: originalEmbed?.timestamp,
+  };
 
-  await interaction.update({
-    embeds: [{
-      color: 0xff69b4,
-      title: "💥 Smash or Pass",
-      description:
-        `Vote maintenant ! 💪 **Smash** ou ❌ **Pass** ?\n\n` +
-        `${bar}\n` +
-        `💪 **${smashPct}%** Smash  •  **${passPct}%** Pass ❌\n` +
-        `_${total} votant(s)_`,
-      image: { url: interaction.message.embeds[0]?.image?.url },
-      footer: { text: `Soumis anonymement • CASTEL PROTECT` },
-      timestamp: interaction.message.embeds[0]?.timestamp,
-    }],
-    components: [updatedRow],
-  });
-}
+  if (session.anonymous) {
+    embed.footer = { text: "Soumis anonymement • CASTEL PROTECT" };
+  } else {
+    embed.author = { name: session.username, icon_url: session.avatarUrl };
+    embed.footer = { text: "CASTEL PROTECT • Smash or Pass" };
+  }
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
-function buildBar(smashPct) {
-  const len      = 16;
-  const smashLen = Math.round((smashPct / 100) * len);
-  const passLen  = len - smashLen;
-  return "🟩".repeat(smashLen) + "🟥".repeat(passLen);
+  await interaction.update({ embeds: [embed], components: [updatedRow] });
 }

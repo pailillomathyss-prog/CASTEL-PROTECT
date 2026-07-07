@@ -11,6 +11,7 @@ import { executeTicketSetup, createTicket, closeTicket } from "./commands/ticket
 import {
   executeSopPhotoSetup,
   handleSopSubmitButton,
+  handleSopModeChoice,
   handleSopDm,
   handleSopVote,
 } from "./commands/sopphoto.js";
@@ -174,6 +175,8 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
     // ── Smash or Pass Photos ──────────────────────────────────────────────────
     if (id === "sop_submit")       return await handleSopSubmitButton(interaction);
+    if (id === "sop_anon")         return await handleSopModeChoice(interaction, true);
+    if (id === "sop_public")       return await handleSopModeChoice(interaction, false);
 
     if (id.startsWith("sop_smash_")) {
       const sessionId = id.replace("sop_smash_", "");
