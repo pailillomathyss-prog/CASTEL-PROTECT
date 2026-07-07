@@ -37,18 +37,23 @@ function checkOwner(message) {
 }
 
 // ── Setup ─────────────────────────────────────────────────────────────────────
-export async function executeVocalSetup(message, PREFIX) {
+export async function executeVocalSetup(message, args, PREFIX) {
   if (!message.member.permissions.has("ManageChannels"))
     return message.reply("❌ Permission `Gérer les salons` requise.");
 
-  const vc = message.mentions.channels.first();
+  // Accepte une mention OU un ID brut
+  const rawId = args[0]?.replace(/[<#>]/g, "");
+  if (!rawId)
+    return message.reply(`❌ Usage : \`${PREFIX}vocal setup <#salon ou ID>\``);
+
+  const vc = message.guild.channels.cache.get(rawId);
   if (!vc || vc.type !== ChannelType.GuildVoice)
-    return message.reply(`❌ Mentionne un **salon vocal**.\nUsage : \`${PREFIX}vocal setup #salon-vocal\``);
+    return message.reply("❌ Salon vocal introuvable. Vérifie l'ID ou la mention.");
 
   vocalConfig[message.guild.id] = { hubChannelId: vc.id, categoryId: vc.parentId || null };
   saveConfig(vocalConfig);
 
-  await message.reply(`✅ Hub configuré : **${vc.name}** — rejoins-le pour créer ton propre salon.`);
+  await message.reply(`✅ Hub configuré : **${vc.name}** (\`${vc.id}\`) — rejoins-le pour créer ton propre salon.`);
 }
 
 // ── Rename ────────────────────────────────────────────────────────────────────

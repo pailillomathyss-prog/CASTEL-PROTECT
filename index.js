@@ -179,7 +179,7 @@ client.on(Events.MessageCreate, async (message) => {
 
       case "vocal": {
         const sub = (args[0] || "").toLowerCase();
-        if      (sub === "setup")  await executeVocalSetup(message, PREFIX);
+        if      (sub === "setup")  await executeVocalSetup(message, args.slice(1), PREFIX);
         else if (sub === "rename") await executeVocalRename(message, args.slice(1), PREFIX);
         else if (sub === "limit")  await executeVocalLimit(message, args.slice(1), PREFIX);
         else if (sub === "lock")   await executeVocalLock(message);
