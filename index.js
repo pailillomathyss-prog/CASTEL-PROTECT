@@ -27,12 +27,13 @@ const client = new Client({
     GatewayIntentBits.MessageContent,
     GatewayIntentBits.GuildMembers,
     GatewayIntentBits.GuildModeration,
-    GatewayIntentBits.DirectMessages,        // Pour recevoir les photos en DM
+    GatewayIntentBits.DirectMessages,
     GatewayIntentBits.DirectMessageReactions,
   ],
   partials: [
-    Partials.Channel,   // Obligatoire pour les DMs
-    Partials.Message,
+    Partials.Channel,   // OBLIGATOIRE pour que les DMs déclenchent MessageCreate
+    Partials.Message,   // Messages partiels
+    Partials.User,      // Auteur potentiellement partiel en DM
   ],
 });
 
@@ -46,6 +47,16 @@ client.once(Events.ClientReady, (c) => {
 
 // ─── Messages ──────────────────────────────────────────────────────────────────
 client.on(Events.MessageCreate, async (message) => {
+  // Résoudre les partials — obligatoire pour les DMs en Discord.js v14
+  if (message.partial) {
+    try { await message.fetch(); } catch { return; }
+  }
+  if (message.channel.partial) {
+    try { await message.channel.fetch(); } catch { return; }
+  }
+
+  if (!message.author) return; // sécurité après fetch
+
   // ── DM → réception photo Smash or Pass ────────────────────────────────────
   if (!message.guild && !message.author.bot) {
     await handleSopDm(message, client);
