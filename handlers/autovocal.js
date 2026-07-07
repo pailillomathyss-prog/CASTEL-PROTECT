@@ -21,8 +21,20 @@ function saveConfig(cfg) {
 // guildId -> { hubChannelId, categoryId? }
 export const vocalConfig = loadConfig();
 
-// Salons temporaires en mémoire : channelId -> ownerId
+// channelId -> ownerId
 export const tempChannels = new Map();
+
+// ── Helper : vérifie que l'auteur est proprio du salon où il se trouve ────────
+function checkOwner(message) {
+  const vcState = message.member.voice;
+  if (!vcState?.channel) return { error: "❌ Tu n'es dans aucun salon vocal." };
+  const channelId = vcState.channel.id;
+  const ownerId   = tempChannels.get(channelId);
+  if (!ownerId)    return { error: "❌ Ce salon n'est pas un salon temporaire." };
+  if (ownerId !== message.member.id && !message.member.permissions.has("ManageChannels"))
+    return { error: "❌ Tu n'es pas le propriétaire de ce salon." };
+  return { channel: vcState.channel };
+}
 
 // ── Setup ─────────────────────────────────────────────────────────────────────
 export async function executeVocalSetup(message, PREFIX) {
@@ -31,45 +43,73 @@ export async function executeVocalSetup(message, PREFIX) {
 
   const vc = message.mentions.channels.first();
   if (!vc || vc.type !== ChannelType.GuildVoice)
-    return message.reply(
-      `❌ Mentionne un **salon vocal**.\nUsage : \`${PREFIX}vocal setup #salon-vocal\``
-    );
+    return message.reply(`❌ Mentionne un **salon vocal**.\nUsage : \`${PREFIX}vocal setup #salon-vocal\``);
 
-  vocalConfig[message.guild.id] = {
-    hubChannelId: vc.id,
-    categoryId: vc.parentId || null,
-  };
+  vocalConfig[message.guild.id] = { hubChannelId: vc.id, categoryId: vc.parentId || null };
   saveConfig(vocalConfig);
 
-  await message.reply(
-    `✅ Système de salons vocaux configuré !\n` +
-    `• Hub : **${vc.name}** — rejoins-le pour créer ton propre salon vocal.`
-  );
+  await message.reply(`✅ Hub configuré : **${vc.name}** — rejoins-le pour créer ton propre salon.`);
 }
 
 // ── Rename ────────────────────────────────────────────────────────────────────
 export async function executeVocalRename(message, args, PREFIX) {
-  const member  = message.member;
-  const vcState = member.voice;
-
-  if (!vcState?.channel)
-    return message.reply("❌ Tu n'es dans aucun salon vocal.");
-
-  const channelId = vcState.channel.id;
-  const ownerId   = tempChannels.get(channelId);
-
-  if (!ownerId)
-    return message.reply("❌ Ce salon n'est pas un salon temporaire.");
-
-  if (ownerId !== member.id && !member.permissions.has("ManageChannels"))
-    return message.reply("❌ Tu n'es pas le propriétaire de ce salon.");
+  const { error, channel } = checkOwner(message);
+  if (error) return message.reply(error);
 
   const newName = args.join(" ").trim().slice(0, 100);
-  if (!newName)
-    return message.reply(`❌ Usage : \`${PREFIX}vocal rename <nouveau nom>\``);
+  if (!newName) return message.reply(`❌ Usage : \`${PREFIX}vocal rename <nouveau nom>\``);
 
-  await vcState.channel.setName(newName);
+  await channel.setName(newName);
   await message.reply(`✅ Salon renommé en **${newName}** !`);
+}
+
+// ── Limit ─────────────────────────────────────────────────────────────────────
+export async function executeVocalLimit(message, args, PREFIX) {
+  const { error, channel } = checkOwner(message);
+  if (error) return message.reply(error);
+
+  const limit = parseInt(args[0]);
+  if (isNaN(limit) || limit < 0 || limit > 99)
+    return message.reply(`❌ Usage : \`${PREFIX}vocal limit <0-99>\` _(0 = illimité)_`);
+
+  await channel.setUserLimit(limit);
+  await message.reply(limit === 0 ? "✅ Salon **illimité**." : `✅ Limite fixée à **${limit} membre(s)**.`);
+}
+
+// ── Lock ──────────────────────────────────────────────────────────────────────
+export async function executeVocalLock(message) {
+  const { error, channel } = checkOwner(message);
+  if (error) return message.reply(error);
+
+  await channel.permissionOverwrites.edit(message.guild.roles.everyone, {
+    Connect: false,
+  });
+  await message.reply("🔒 Salon **verrouillé** — plus personne ne peut rejoindre.");
+}
+
+// ── Unlock ────────────────────────────────────────────────────────────────────
+export async function executeVocalUnlock(message) {
+  const { error, channel } = checkOwner(message);
+  if (error) return message.reply(error);
+
+  await channel.permissionOverwrites.edit(message.guild.roles.everyone, {
+    Connect: null, // reset à la permission par défaut
+  });
+  await message.reply("🔓 Salon **déverrouillé** — tout le monde peut rejoindre.");
+}
+
+// ── Kick ──────────────────────────────────────────────────────────────────────
+export async function executeVocalKick(message, PREFIX) {
+  const { error, channel } = checkOwner(message);
+  if (error) return message.reply(error);
+
+  const target = message.mentions.members.first();
+  if (!target) return message.reply(`❌ Usage : \`${PREFIX}vocal kick @user\``);
+  if (target.id === message.member.id) return message.reply("❌ Tu ne peux pas t'expulser toi-même.");
+  if (target.voice?.channelId !== channel.id) return message.reply("❌ Ce membre n'est pas dans ton salon.");
+
+  await target.voice.disconnect();
+  await message.reply(`✅ **${target.displayName}** a été expulsé du salon.`);
 }
 
 // ── VoiceStateUpdate handler ──────────────────────────────────────────────────
@@ -81,11 +121,11 @@ export async function handleVoiceStateUpdate(oldState, newState) {
   // ── Quelqu'un rejoint le hub → créer son salon ────────────────────────────
   if (newState.channelId === config.hubChannelId && newState.member) {
     const member = newState.member;
-    const name   = `🔊 ${member.displayName}`;
+    const PREFIX = process.env.PREFIX || "!";
 
     try {
       const newChannel = await guild.channels.create({
-        name,
+        name: `🔊 ${member.displayName}`,
         type: ChannelType.GuildVoice,
         parent: config.categoryId || null,
         permissionOverwrites: [
@@ -103,6 +143,24 @@ export async function handleVoiceStateUpdate(oldState, newState) {
 
       tempChannels.set(newChannel.id, member.id);
       await member.voice.setChannel(newChannel);
+
+      // Message d'accueil dans le chat de la vocal
+      await newChannel.send({
+        embeds: [{
+          color: 0x5865f2,
+          title: "🔊 Ton salon vocal",
+          description:
+            `Bienvenue ${member} ! Ce salon t'appartient.\n\n` +
+            `**Commandes disponibles ici :**\n` +
+            `\`${PREFIX}vocal rename <nom>\` — Renommer ce salon\n` +
+            `\`${PREFIX}vocal limit <nombre>\` — Limiter le nombre de membres _(0 = illimité)_\n` +
+            `\`${PREFIX}vocal lock\` — Verrouiller _(personne d'autre ne peut rejoindre)_\n` +
+            `\`${PREFIX}vocal unlock\` — Déverrouiller\n` +
+            `\`${PREFIX}vocal kick @user\` — Expulser quelqu'un de ta vocal\n\n` +
+            `_Le salon sera supprimé automatiquement quand il sera vide._`,
+          footer: { text: "CASTEL PROTECT • Salons vocaux" },
+        }],
+      });
     } catch (err) {
       console.error("[autovocal] Création échouée :", err.message);
     }

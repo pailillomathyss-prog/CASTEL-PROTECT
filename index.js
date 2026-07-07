@@ -23,6 +23,10 @@ import {
 import {
   executeVocalSetup,
   executeVocalRename,
+  executeVocalLimit,
+  executeVocalLock,
+  executeVocalUnlock,
+  executeVocalKick,
   handleVoiceStateUpdate,
 } from "./handlers/autovocal.js";
 
@@ -173,19 +177,25 @@ client.on(Events.MessageCreate, async (message) => {
         await executeGiveaway(message, args, PREFIX);
         break;
 
-      case "vocal":
-        if ((args[0] || "").toLowerCase() === "setup") {
-          await executeVocalSetup(message, PREFIX);
-        } else if ((args[0] || "").toLowerCase() === "rename") {
-          await executeVocalRename(message, args.slice(1), PREFIX);
-        } else {
-          await message.reply(
-            `Usage :\n` +
-            `• \`${PREFIX}vocal setup #salon-hub\` — Configurer\n` +
-            `• \`${PREFIX}vocal rename <nom>\` — Renommer ton salon`
-          );
-        }
+      case "vocal": {
+        const sub = (args[0] || "").toLowerCase();
+        if      (sub === "setup")  await executeVocalSetup(message, PREFIX);
+        else if (sub === "rename") await executeVocalRename(message, args.slice(1), PREFIX);
+        else if (sub === "limit")  await executeVocalLimit(message, args.slice(1), PREFIX);
+        else if (sub === "lock")   await executeVocalLock(message);
+        else if (sub === "unlock") await executeVocalUnlock(message);
+        else if (sub === "kick")   await executeVocalKick(message, PREFIX);
+        else await message.reply(
+          `**Commandes vocales :**\n` +
+          `\`${PREFIX}vocal setup #hub\` — Configurer\n` +
+          `\`${PREFIX}vocal rename <nom>\` — Renommer\n` +
+          `\`${PREFIX}vocal limit <0-99>\` — Limiter les places\n` +
+          `\`${PREFIX}vocal lock\` — Verrouiller\n` +
+          `\`${PREFIX}vocal unlock\` — Déverrouiller\n` +
+          `\`${PREFIX}vocal kick @user\` — Expulser`
+        );
         break;
+      }
 
       case "sopphoto":
         if ((args[0] || "").toLowerCase() === "setup") {
