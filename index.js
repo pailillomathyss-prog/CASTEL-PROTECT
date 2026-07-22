@@ -30,6 +30,7 @@ import {
   handleVoiceStateUpdate,
 } from "./handlers/autovocal.js";
 import { massDmCommand, executeMassDm } from "./commands/massdm.js";
+import { executeRolePanel, handleRoleButton } from "./commands/rolepanel.js";
 
 const PREFIX = process.env.PREFIX || "!";
 const TOKEN  = process.env.DISCORD_TOKEN;
@@ -219,6 +220,11 @@ client.on(Events.MessageCreate, async (message) => {
       case "smashpass":
         await executeSmashPass(message, args, PREFIX);
         break;
+
+      case "rolepanel":
+        if (args[0] === "setup") await executeRolePanel(message);
+        else await message.reply(`Usage : \`${PREFIX}rolepanel setup\``);
+        break;
     }
   } catch (err) {
     console.error(`[ERREUR ${command}]`, err);
@@ -253,6 +259,9 @@ client.on(Events.InteractionCreate, async (interaction) => {
     if (id.startsWith("sop_pass_"))  return await handleSopVote(interaction, "pass",  id.replace("sop_pass_", ""));
 
     if (id.startsWith("gw_join_"))  return await handleGiveawayJoin(interaction, id.replace("gw_join_", ""));
+
+    // ── Panel de rôles ────────────────────────────────────────────────────────
+    if (id.startsWith("role_"))     return await handleRoleButton(interaction);
 
   } catch (err) {
     console.error("[ERREUR interaction]", err);
