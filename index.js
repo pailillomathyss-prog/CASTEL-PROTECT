@@ -1,5 +1,5 @@
 import "dotenv/config";
-import { Client, GatewayIntentBits, Events, Partials } from "discord.js";
+import { Client, GatewayIntentBits, Events, Partials, REST, Routes } from "discord.js";
 import { handleAntiLink, antilinkEnabled, enableAntilink, disableAntilink } from "./handlers/antilink.js";
 import { executeBan }         from "./commands/ban.js";
 import { executeUnban }       from "./commands/unban.js";
@@ -29,6 +29,7 @@ import {
   executeVocalKick,
   handleVoiceStateUpdate,
 } from "./handlers/autovocal.js";
+import { massDmCommand, executeMassDm } from "./commands/massdm.js";
 
 const PREFIX = process.env.PREFIX || "!";
 const TOKEN  = process.env.DISCORD_TOKEN;
@@ -41,7 +42,7 @@ const client = new Client({
     GatewayIntentBits.MessageContent,
     GatewayIntentBits.GuildMembers,
     GatewayIntentBits.GuildModeration,
-    GatewayIntentBits.GuildVoiceStates,      // Pour les salons vocaux
+    GatewayIntentBits.GuildVoiceStates,
     GatewayIntentBits.DirectMessages,
     GatewayIntentBits.DirectMessageReactions,
   ],
@@ -53,11 +54,25 @@ const client = new Client({
 });
 
 // ─── Ready ─────────────────────────────────────────────────────────────────────
-client.once(Events.ClientReady, (c) => {
+client.once(Events.ClientReady, async (c) => {
   console.log(`✅ ${c.user.tag} en ligne !`);
   console.log(`📌 Préfixe : ${PREFIX}`);
   c.user.setActivity("🛡️ CASTEL PROTECT | " + PREFIX + "help");
-  resumeGiveaways(c); // Relancer les giveaways actifs après redémarrage
+  resumeGiveaways(c);
+
+  // ── Enregistrement de /dmall sur tous les serveurs du bot ─────────────────
+  try {
+    const rest = new REST().setToken(TOKEN);
+    for (const [guildId] of c.guilds.cache) {
+      await rest.put(
+        Routes.applicationGuildCommands(c.application.id, guildId),
+        { body: [massDmCommand] },
+      );
+      console.log(`✅ /dmall enregistré sur le serveur ${guildId}`);
+    }
+  } catch (err) {
+    console.error("❌ Erreur enregistrement /dmall :", err);
+  }
 });
 
 // ─── Vocal auto ────────────────────────────────────────────────────────────────
@@ -65,7 +80,6 @@ client.on(Events.VoiceStateUpdate, handleVoiceStateUpdate);
 
 // ─── Messages ──────────────────────────────────────────────────────────────────
 client.on(Events.MessageCreate, async (message) => {
-  // Résoudre les partials (obligatoire pour les DMs)
   if (message.partial) {
     try { await message.fetch(); } catch { return; }
   }
@@ -104,101 +118,97 @@ client.on(Events.MessageCreate, async (message) => {
             fields: [
               {
                 name: "🔗 Anti-lien",
-                value:
-                  `\`${PREFIX}antilink on/off/status\``,
+                value: `\`${PREFIX}antilink on/off/status\``,
               },
               {
                 name: "🔨 Modération",
                 value:
                   `\`${PREFIX}ban @user [raison]\`\n` +
                   `\`${PREFIX}unban <ID> [raison]\`\n` +
-                  `\`${PREFIX}mute @user [durée] [raison]\`\n` +
+                  `\`${PREFIX}mute @user [raison]\`\n` +
                   `\`${PREFIX}unmute @user\`\n` +
-                  `\`${PREFIX}clear [nombre]\``,
+                  `\`${PREFIX}clear <nombre>\``,
               },
               {
                 name: "🎫 Tickets",
-                value: `\`${PREFIX}ticket setup [#salon]\``,
+                value: `\`${PREFIX}ticket setup #salon\``,
               },
               {
                 name: "🎉 Giveaway",
-                value:
-                  `\`${PREFIX}gw <durée> <lot>\`\n` +
-                  `_Exemples : \`${PREFIX}gw 10m Nitro\`, \`${PREFIX}gw 1h Role VIP\`_`,
+                value: `\`${PREFIX}giveaway <durée> <nb gagnants> <prix>\``,
               },
               {
-                name: "🔊 Salons Vocaux Auto",
+                name: "🔊 Vocal auto",
                 value:
-                  `\`${PREFIX}vocal setup #salon-hub\` — Configurer le hub vocal\n` +
-                  `\`${PREFIX}vocal rename <nom>\` — Renommer ton salon`,
+                  `\`${PREFIX}vocal setup #salon\`\n` +
+                  `\`${PREFIX}vocal rename <nom>\`\n` +
+                  `\`${PREFIX}vocal limit <nb>\`\n` +
+                  `\`${PREFIX}vocal lock/unlock\`\n` +
+                  `\`${PREFIX}vocal kick @user\``,
               },
               {
-                name: "📸 Smash or Pass Photos",
+                name: "📸 Smash or Pass",
                 value: `\`${PREFIX}sopphoto setup #panel #votes\``,
               },
               {
-                name: "🎮 Fun",
-                value: `\`${PREFIX}sop [sujet]\` — Smash or Pass texte`,
+                name: "📨 Mass DM",
+                value: `\`/dmall\` — Envoie un DM embed à tous les membres (admin)`,
               },
             ],
-            footer: { text: "CASTEL PROTECT • Modération & Fun" },
-            timestamp: new Date().toISOString(),
           }],
         });
         break;
 
-      case "antilink": {
-        if (!message.member.permissions.has("ManageGuild"))
-          return message.reply("❌ Permission `Gérer le serveur` requise.");
-        const sub = (args[0] || "").toLowerCase();
-        if      (sub === "on")     { enableAntilink(message.guild.id);  await message.reply("✅ Anti-lien **activé**."); }
-        else if (sub === "off")    { disableAntilink(message.guild.id); await message.reply("🔓 Anti-lien **désactivé**."); }
-        else if (sub === "status") { await message.reply(`🔗 Anti-lien : ${antilinkEnabled.has(message.guild.id) ? "**✅ Activé**" : "**❌ Désactivé**"}`); }
-        else                       { await message.reply(`Usage : \`${PREFIX}antilink on/off/status\``); }
+      case "antilink":
+        if (args[0] === "on")     { enableAntilink(message.guild.id);  await message.reply("✅ Anti-lien activé.");   }
+        else if (args[0] === "off")    { disableAntilink(message.guild.id); await message.reply("✅ Anti-lien désactivé."); }
+        else if (args[0] === "status") { await message.reply(antilinkEnabled.has(message.guild.id) ? "🟢 Anti-lien activé." : "🔴 Anti-lien désactivé."); }
+        else                           { await message.reply(`Usage : \`${PREFIX}antilink on/off/status\``); }
         break;
-      }
 
-      case "ban":    await executeBan(message, args, PREFIX);    break;
-      case "unban":  await executeUnban(message, args, PREFIX);  break;
-      case "mute":   await executeMute(message, args, PREFIX);   break;
-      case "unmute": await executeUnmute(message, args, PREFIX); break;
-      case "clear":  await executeClear(message, args, PREFIX);  break;
+      case "ban":
+        await executeBan(message, args);
+        break;
+
+      case "unban":
+        await executeUnban(message, args);
+        break;
+
+      case "mute":
+        await executeMute(message, args);
+        break;
+
+      case "unmute":
+        await executeUnmute(message, args);
+        break;
+
+      case "clear":
+        await executeClear(message, args);
+        break;
 
       case "ticket":
-        if ((args[0] || "").toLowerCase() === "setup") {
-          await executeTicketSetup(message, args.slice(1), PREFIX);
-        } else {
-          await message.reply(`Usage : \`${PREFIX}ticket setup [#salon]\``);
+        if (args[0] === "setup") await executeTicketSetup(message, args.slice(1));
+        else await message.reply(`Usage : \`${PREFIX}ticket setup #salon\``);
+        break;
+
+      case "giveaway":
+        await executeGiveaway(message, args);
+        break;
+
+      case "vocal":
+        switch (args[0]) {
+          case "setup":   await executeVocalSetup(message, args.slice(1));  break;
+          case "rename":  await executeVocalRename(message, args.slice(1)); break;
+          case "limit":   await executeVocalLimit(message, args.slice(1));  break;
+          case "lock":    await executeVocalLock(message);                  break;
+          case "unlock":  await executeVocalUnlock(message);                break;
+          case "kick":    await executeVocalKick(message, args.slice(1));   break;
+          default: await message.reply(`Usage : \`${PREFIX}vocal setup/rename/limit/lock/unlock/kick\``);
         }
         break;
 
-      case "gw":
-      case "giveaway":
-        await executeGiveaway(message, args, PREFIX);
-        break;
-
-      case "vocal": {
-        const sub = (args[0] || "").toLowerCase();
-        if      (sub === "setup")  await executeVocalSetup(message, args.slice(1), PREFIX);
-        else if (sub === "rename") await executeVocalRename(message, args.slice(1), PREFIX);
-        else if (sub === "limit")  await executeVocalLimit(message, args.slice(1), PREFIX);
-        else if (sub === "lock")   await executeVocalLock(message);
-        else if (sub === "unlock") await executeVocalUnlock(message);
-        else if (sub === "kick")   await executeVocalKick(message, PREFIX);
-        else await message.reply(
-          `**Commandes vocales :**\n` +
-          `\`${PREFIX}vocal setup #hub\` — Configurer\n` +
-          `\`${PREFIX}vocal rename <nom>\` — Renommer\n` +
-          `\`${PREFIX}vocal limit <0-99>\` — Limiter les places\n` +
-          `\`${PREFIX}vocal lock\` — Verrouiller\n` +
-          `\`${PREFIX}vocal unlock\` — Déverrouiller\n` +
-          `\`${PREFIX}vocal kick @user\` — Expulser`
-        );
-        break;
-      }
-
       case "sopphoto":
-        if ((args[0] || "").toLowerCase() === "setup") {
+        if (args[0] === "setup") {
           await executeSopPhotoSetup(message, args.slice(1), PREFIX);
         } else {
           await message.reply(`Usage : \`${PREFIX}sopphoto setup #panel #votes\``);
@@ -216,27 +226,32 @@ client.on(Events.MessageCreate, async (message) => {
   }
 });
 
-// ─── Interactions (boutons) ────────────────────────────────────────────────────
+// ─── Interactions (slash commands + boutons) ───────────────────────────────────
 client.on(Events.InteractionCreate, async (interaction) => {
-  if (!interaction.isButton()) return;
-
-  const id = interaction.customId;
-
   try {
-    // ── Tickets ───────────────────────────────────────────────────────────────
+    // ── Slash commands ────────────────────────────────────────────────────────
+    if (interaction.isChatInputCommand()) {
+      if (interaction.commandName === "dmall") {
+        await executeMassDm(interaction);
+      }
+      return;
+    }
+
+    // ── Boutons ───────────────────────────────────────────────────────────────
+    if (!interaction.isButton()) return;
+    const id = interaction.customId;
+
     if (id === "ticket_rankup")    return await createTicket(interaction, "rankup");
     if (id === "ticket_bugreport") return await createTicket(interaction, "bugreport");
     if (id === "ticket_autre")     return await createTicket(interaction, "autre");
     if (id === "ticket_close")     return await closeTicket(interaction);
 
-    // ── Smash or Pass Photos ──────────────────────────────────────────────────
     if (id === "sop_submit")       return await handleSopSubmitButton(interaction);
     if (id === "sop_anon")         return await handleSopModeChoice(interaction, true);
     if (id === "sop_public")       return await handleSopModeChoice(interaction, false);
     if (id.startsWith("sop_smash_")) return await handleSopVote(interaction, "smash", id.replace("sop_smash_", ""));
     if (id.startsWith("sop_pass_"))  return await handleSopVote(interaction, "pass",  id.replace("sop_pass_", ""));
 
-    // ── Giveaway ──────────────────────────────────────────────────────────────
     if (id.startsWith("gw_join_"))  return await handleGiveawayJoin(interaction, id.replace("gw_join_", ""));
 
   } catch (err) {
