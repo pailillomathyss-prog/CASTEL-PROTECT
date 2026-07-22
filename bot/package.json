@@ -1,7 +1,7 @@
 {
   "name": "castel-protect-bot",
   "version": "1.0.0",
-  "description": "Discord bot with +dmall command",
+  "description": "Discord bot with /dmall slash command",
   "private": true,
   "scripts": {
     "start": "tsx src/index.ts",
