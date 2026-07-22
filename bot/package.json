@@ -1,0 +1,23 @@
+{
+  "name": "castel-protect-bot",
+  "version": "1.0.0",
+  "description": "Discord bot with +dmall command",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node --experimental-strip-types src/index.ts",
+    "dev": "node --watch --experimental-strip-types src/index.ts",
+    "build": "tsc",
+    "start:compiled": "node dist/index.js"
+  },
+  "dependencies": {
+    "discord.js": "^14.21.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.7.0"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}
