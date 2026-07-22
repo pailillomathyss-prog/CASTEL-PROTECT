@@ -8,7 +8,8 @@ Bot Discord avec commande `/dmall` pour envoyer un embed en DM à tous les membr
 |---|---|
 | `DISCORD_BOT_TOKEN` | Token du bot (Developer Portal → Bot → Reset Token) |
 | `DISCORD_GUILD_ID` | ID du serveur (clic droit sur le serveur → Copier l'ID) |
-| `DISCORD_CLIENT_ID` | ID de l'application (Developer Portal → General Information → Application ID) |
+
+> L'Application ID est récupéré automatiquement — pas besoin de variable supplémentaire.
 
 ## Commandes slash
 
@@ -16,11 +17,9 @@ Bot Discord avec commande `/dmall` pour envoyer un embed en DM à tous les membr
 |---|---|---|
 | `/dmall` | Envoie l'embed en DM à tous les membres | Administrateur |
 
-## Intents requis (Developer Portal → Bot)
+## Intent requis (Developer Portal → Bot → Privileged Gateway Intents)
 
-- ✅ **Server Members Intent** uniquement
-
-> ⚠️ Message Content Intent **pas nécessaire** avec les slash commands.
+- ✅ **Server Members Intent**
 
 ## Modifier l'embed
 

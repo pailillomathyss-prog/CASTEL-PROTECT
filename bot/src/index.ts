@@ -9,18 +9,13 @@ import {
   REST,
   Routes,
   SlashCommandBuilder,
-  ChatInputCommandInteraction,
-  InteractionResponse,
-  Message as DiscordMessage,
 } from "discord.js";
 
-const TOKEN   = process.env.DISCORD_BOT_TOKEN;
+const TOKEN    = process.env.DISCORD_BOT_TOKEN;
 const GUILD_ID = process.env.DISCORD_GUILD_ID;
-const CLIENT_ID = process.env.DISCORD_CLIENT_ID;
 
-if (!TOKEN)     { console.error("❌ DISCORD_BOT_TOKEN manquant");  process.exit(1); }
-if (!GUILD_ID)  { console.error("❌ DISCORD_GUILD_ID manquant");   process.exit(1); }
-if (!CLIENT_ID) { console.error("❌ DISCORD_CLIENT_ID manquant");  process.exit(1); }
+if (!TOKEN)    { console.error("❌ DISCORD_BOT_TOKEN manquant");  process.exit(1); }
+if (!GUILD_ID) { console.error("❌ DISCORD_GUILD_ID manquant");   process.exit(1); }
 
 // ─── Config embed ─────────────────────────────────────────────────────────────
 const EMBED_TITLE       = "VSEY #NEW";
@@ -28,31 +23,6 @@ const EMBED_DESCRIPTION = "VSEY EST UN NOUVEAU SERVEUR COMMUNAUTAIRE PRÊT À VO
 const EMBED_COLOR       = 0x5865f2;
 const BUTTON_LABEL      = "JOIN";
 const BUTTON_URL        = "https://discord.gg/zF6u4YWyWG";
-// ─────────────────────────────────────────────────────────────────────────────
-
-// ─── Enregistrement de la slash command auprès de Discord ────────────────────
-const commands = [
-  new SlashCommandBuilder()
-    .setName("dmall")
-    .setDescription("Envoie l'embed en DM à tous les membres du serveur")
-    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
-    .toJSON(),
-];
-
-const rest = new REST().setToken(TOKEN!);
-
-async function registerCommands() {
-  try {
-    console.log("🔄 Enregistrement de la commande /dmall...");
-    await rest.put(
-      Routes.applicationGuildCommands(CLIENT_ID!, GUILD_ID!),
-      { body: commands },
-    );
-    console.log("✅ Commande /dmall enregistrée sur le serveur.");
-  } catch (err) {
-    console.error("❌ Erreur lors de l'enregistrement des commandes :", err);
-  }
-}
 // ─────────────────────────────────────────────────────────────────────────────
 
 const client = new Client({
@@ -68,9 +38,29 @@ client.once("ready", async () => {
   console.log("=================================");
   console.log(`✅ Bot prêt : ${client.user!.tag}`);
   console.log(`📡 GUILD_ID  : ${GUILD_ID}`);
-  console.log(`🤖 CLIENT_ID : ${CLIENT_ID}`);
   console.log("=================================");
-  await registerCommands();
+
+  // Récupère l'Application ID directement depuis le client connecté
+  const appId = client.application!.id;
+  console.log(`🤖 APP_ID (auto) : ${appId}`);
+
+  // Enregistre /dmall uniquement sur ce serveur (instantané)
+  const rest = new REST().setToken(TOKEN!);
+  try {
+    const command = new SlashCommandBuilder()
+      .setName("dmall")
+      .setDescription("Envoie l'embed en DM à tous les membres du serveur")
+      .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+      .toJSON();
+
+    await rest.put(
+      Routes.applicationGuildCommands(appId, GUILD_ID!),
+      { body: [command] },
+    );
+    console.log("✅ Commande /dmall enregistrée avec succès !");
+  } catch (err) {
+    console.error("❌ Erreur enregistrement commande :", err);
+  }
 });
 
 client.on("interactionCreate", async (interaction) => {
@@ -82,15 +72,13 @@ client.on("interactionCreate", async (interaction) => {
     return;
   }
 
-  // Defer public pour pouvoir éditer le message ensuite
   await interaction.deferReply();
-
   dmRunning = true;
 
   try {
-    const guild   = await client.guilds.fetch(GUILD_ID!);
-    const all     = await guild.members.fetch();
-    const humans  = [...all.values()].filter((m) => !m.user.bot);
+    const guild  = await client.guilds.fetch(GUILD_ID!);
+    const all    = await guild.members.fetch();
+    const humans = [...all.values()].filter((m) => !m.user.bot);
 
     await interaction.editReply(`📨 Envoi en cours à **${humans.length} membres**...`);
 
@@ -121,14 +109,12 @@ client.on("interactionCreate", async (interaction) => {
         console.log(`  ✘ ${mbr.user.tag} (DMs fermés)`);
       }
 
-      // Mise à jour toutes les 10 personnes
       if ((i + 1) % 10 === 0) {
         await interaction.editReply(
           `📨 **${i + 1}/${humans.length}** — ✅ ${ok} envoyés | ❌ ${fail} échoués`,
         );
       }
 
-      // Pause anti rate-limit Discord
       await new Promise((r) => setTimeout(r, 1200));
     }
 
@@ -147,7 +133,7 @@ client.on("interactionCreate", async (interaction) => {
     console.log(`🎉 Terminé — Succès: ${ok} | Échecs: ${fail}`);
   } catch (err) {
     console.error("Erreur mass DM:", err);
-    await interaction.editReply("❌ Erreur pendant l'envoi. Vérifie les logs Railway.");
+    await interaction.editReply("❌ Erreur. Vérifie les logs Railway.");
   } finally {
     dmRunning = false;
   }
